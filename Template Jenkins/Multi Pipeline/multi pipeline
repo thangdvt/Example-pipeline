@@ -1,0 +1,51 @@
+def project = 'FHO.PID.Csharp-dotnetcore-AAP-Example'
+def gitUrl = 'https://git3.fsoft.com.vn/GROUP/DevOps/example-application/csharp_dotnetcore_example.git'
+def branch = 'master'
+def credentialID = 'fsoft-ldap-devopsgit'
+
+pipeline {
+    agent {
+        any agent
+    }
+    triggers {
+        gotlab (
+            triggerOnPush: true, // có một commit dc đấy lên gist server
+            triggerOnMergeRequest: true: // kích hoạt pipeline khi có 1 merge request dc khởi tạo
+            branchFilterType: 'develop' //chạy các hành động trigger với tât cả các branch
+        )
+    }
+}
+parameters {
+    booleanParam(name: 'develop_phase54', defaultValue: true, description: 'true if you want to build develop_phase54')
+    booleanParam(name: 'develop_phase55', defaultValue: true, description: 'true if you want to build develop_phase55')
+}
+    stages {
+        stage('Checkout') {
+            steps {
+                checkout([$class: 'GitSCM',
+                    branches: [[name: "${branch}"]],
+                    doGenerateSubmoduleConfigurations: false,
+                    extensions: [], gitTool: 'jgitapache',                 // extensions: [[$class: 'CleanBeforeCheckout']]: Clean Before Checkout
+                    submoduleCfg: [],
+                    userRemoteConfigs: [[credentialsId: "${credentialID}",
+                        url: "${gitUrl}"]]
+                ])
+            }
+        }
+        stage ('Build test1'){
+            when {
+                expression {(params.test1)}
+            }
+            steps{ //if ('params.test1')
+                build 'test1-pipeline'
+            }
+        }
+        stage ('Build test2'){
+            when {
+                expression {(params.test2)}
+            }
+            steps{
+                build 'test2-pipeline'
+            }
+        }
+    }

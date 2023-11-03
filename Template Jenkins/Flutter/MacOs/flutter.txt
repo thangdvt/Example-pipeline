@@ -1,0 +1,143 @@
+/** PROJECT PROPERTIES
+* project: Project Name
+* gitUrl: Link repository
+* branch: Branch Name exist in repository
+* credentialID: Login to repository
+*/
+def project = "Project"
+//def gitUrl = ""
+def gitUrl = "https://git3.fsoft.com.vn/fsoft/PROJECT.git"
+def branch = "master"
+def credentialID = "gitlab_token"
+
+/**SONARQUBE PROPERTIES
+* sonar_host_url: Sonarqube server
+* token_sonarqube: Use token push report 
+*/
+def sonar_host_url = "${SERVER_SONAR1}"
+def token_sonarqube = "sonar_token"
+
+/** NOTIFICATION PROPERTIES
+* email: Email address (Keep this mail, User can add personal email, separate with  ";")
+* logSuccessMessage: Print message with green color
+* logFailedMessage: Print message with red color
+*/
+def email = "" // Keep this mail, User can add personal email, separate with  ";"
+def logSuccessMessage(_message){
+    println("\u001b[32m>>>>>>>>>>>>>>>>>>>>${_message}<<<<<<<<<<<<<<<<<<<\u001b[32m.\u001b[0m") //Print message with green color
+}
+def logFailedMessage(_message){
+    println("\u001b[31m>>>>>>>>>>>>>>>>>>>>${_message}<<<<<<<<<<<<<<<<<<<\u001b[31m.\u001b[0m") //Print message with red color
+}
+pipeline {
+
+    /** agent
+    * label: Agent name will execute pipeline
+    */
+    agent {
+        label '10.x.x.x'
+    }
+
+    /** environment
+    * SONAR_HOME = "${tool 'sonar-scanner-3'}": Set up Sonarqube tool
+    * BD_HOME = "C:/DevOpsTools/scan.cli-2018.12.4": Path to Black Duck tool
+    * NODEJS_HOME = "${tool 'nodejs-10'}": Set up Nodejs in LinuxOS
+    * PATH: Add environment variable
+    */
+    environment {
+        JAVA_HOME = "${tool 'jdk-lastest-windows'}"
+        SONAR_HOME = "Users/USERNAME/Downloads/sonar-scanner"
+        PATH = "${env.JAVA_HOME}/bin:${env.SONAR_HOME}/bin:${env.PATH}"
+    }
+
+    stages {
+        /** Checkout
+        * Get source code from SVN, Git,...
+        */
+        stage('Checkout') {
+            steps {
+                checkout([$class: 'GitSCM',
+                    branches: [[name: "${branch}"]],
+                    doGenerateSubmoduleConfigurations: false,
+                    extensions: [], gitTool: 'jgitapache', // extensions: [[$class: 'CleanBeforeCheckout']]: Clean Before Checkout
+                    submoduleCfg: [],
+                    userRemoteConfigs: [[credentialsId: "${credentialID}",
+                        url: "${gitUrl}"]]
+                ])
+            }
+        }
+
+   
+        stage('CHECK pub get'){
+            steps{
+              sh 'flutter pub get'
+            }
+        }
+
+        stage('BUILD APK'){
+            steps{
+              echo 'buiding apk started'
+              sh 'flutter  build apk'
+              echo ' build apk end'
+            }
+        }
+
+         stage('BUILD IOS'){
+            steps{
+              echo 'buiding ios started'
+              sh 'flutter  build ios'
+              echo ' build ios end'
+            }
+        }
+
+        /** Sonarqube Scanner
+        * Dsonar.login: Authentication token
+        * Dsonar.host.url: URL of sonar server
+        * Dsonar.projectKey: Define ID of project
+        * Dsonar.projectName: Define Name of project
+        * Dsonar.sourceEncoding: Encoding of the source code. Default is default system encoding
+        * Dsonar.branch.name: Sonar multibranch
+        * Dsonar.typescript.lcov.reportPaths: path_to_test-reporter.xml 
+        * Dsonar.branch.name=${branch}: Name of the branch (visible in the UI). Use Long living branches or Short-lived branches
+        * Dsonar.branch.target=${branch}: Name of the branch where you intend to merge your short-lived branch at the end of its life. If left blank, this defaults to the master branch.        
+        * Dsonar.sources: Path to source folder. Defaults to .
+        * Dsonar.projectVersion: define version project
+        */
+        stage("Sonarqube") {
+            steps {
+                sh "sonar-scanner " +
+                    "-Dsonar.login=${token_sonarqube} " +
+                    "-Dsonar.host.url=${sonar_host_url} " +
+                    "-Dsonar.projectKey=${project} " +
+                    "-Dsonar.projectName=${project} " +
+                    "-Dsonar.sourceEncoding=UTF-8 " +               
+                    "-Dsonar.sources=. " +
+                    "-Dsonar.java.binaries=. " +	
+                    "-Dsonar.lang.patterns.objc=.m,.mm " + 
+                    "-Dsonar.projectVersion=${env.BUILD_NUMBER}_${branch}"
+            }
+        }
+    }
+
+    post {
+        /**
+        * Update status to GitLab after run CI
+        * Send email notification 
+        */
+        success {
+            updateGitlabCommitStatus name: 'JenkinsCI', state: 'success'
+            emailext(attachLog: false,
+                body: 'Please check it out, link : $BUILD_URL',
+                subject: "SUCCESS :Job ${env.JOB_NAME} - Build# ${env.BUILD_NUMBER}",
+                to: "${email}")
+        }
+
+        failure {
+            updateGitlabCommitStatus name: 'JenkinsCI', state: 'failed'
+            emailext(attachLog: true,
+                body: 'Please check it out , link : $BUILD_URL',
+                subject: "FAILED :Job ${env.JOB_NAME} - Build# ${env.BUILD_NUMBER}",
+                to: "${email}")
+        }
+    }
+}

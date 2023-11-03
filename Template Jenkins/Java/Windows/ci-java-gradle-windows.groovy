@@ -1,0 +1,159 @@
+/** PROJECT PROPERTIES
+* project: Project Name mapping project Sonar/Coveirty/Blackduck
+* gitUrl: Link repository
+* branch: Branch Name exist in repository
+* credentialID: Login to repository
+*/
+def project = "FHO.PID.Java-Gradle-Windows-Example"
+def gitUrl = "https://git3.fsoft.com.vn/GROUP/DevOps/example-application/java_gradle_example.git"
+def branch = "master"
+def credentialID = "fsoft-ldap-devopsgit"
+
+/**SONARQUBE PROPERTIES
+* sonar_host_url: Sonarqube server : https://sonar1.fsoft.com.vn, https://sonar-dn.fsoft.com.vn
+* token_sonarqube: Use token push report 
+*/
+def sonar_host_url = "${SERVER_SONAR1}"
+def token_sonarqube = " "
+
+/** BLACKDUCK PROPERTIES
+* blackduck_server: Black Duck server
+* blackduck_token: Use token push report 
+*/
+def blackduck_server = "stg-blackduck.fsoft.com.vn --port 443 --scheme HTTPS"
+def blackduck_token = "NzBkOGI0ZWMtNmM5Mi00OTgzLWI2NTctOTcyMTg5ODQzNDdlOjE4MTk0M2U0LTRkNGEtNDRmYi1iYmEwLTIwZmU5N2NjMGU0MA=="
+def blackduck_exclude = "/.scannerwork/"
+
+/** NOTIFICATION PROPERTIES
+* email: Email address (Keep this mail, User can add personal email, separate with  ";")
+* logSuccessMessage: Print message with green color
+* logFailedMessage: Print message with red color
+*/
+def email = "4e61aeb0.FPTSoftware362.onmicrosoft.com@apac.teams.ms" 
+def logSuccessMessage(_message){
+    println("\u001b[32m>>>>>>>>>>>>>>>>>>>>${_message}<<<<<<<<<<<<<<<<<<<\u001b[32m.\u001b[0m") 
+}
+def logFailedMessage(_message){
+    println("\u001b[31m>>>>>>>>>>>>>>>>>>>>${_message}<<<<<<<<<<<<<<<<<<<\u001b[31m.\u001b[0m") 
+}
+
+pipeline {
+
+    /** agent
+    * label: Name of Node build
+    */
+    agent { 
+        label 'agent-windows-example'
+    }
+
+    /** environment
+    * SONAR_HOME = tool name: "SONAR_SCANNER_WINDOWS": Set up Sonarqube tool
+    * COVERITY_HOME = "C:/Program Files/Coverity/Coverity Static Analysis": Path to Coverity tool
+    * BD_HOME = 'C:/DevOpsTools/scan.cli-2018.12.4': Path to Black Duck tool
+    * GRADLE_HOME = "${tool 'gradle-5.3.1'}": Set up Gradle tool
+    * PATH: Add environment variable
+    */
+    environment {
+        JAVA_HOME = "${tool 'jdk-lastest-windows'}"
+        SONAR_HOME = "${tool 'sonar-scanner-latest-windows'}"
+        COVERITY_HOME = "C:/Program Files/Coverity/Coverity Static Analysis"
+        BD_HOME = "C:/DevOpsTools/scan.cli-2018.12.4"
+        BD_HUB_TOKEN = "${blackduck_token}" 
+        GRADLE_HOME = "${tool 'gradle-5.3.1'}" 
+        PATH="${env.JAVA_HOME}/bin;${env.SONAR_HOME}/bin;${env.COVERITY_HOME}/bin;${env.BD_HOME}/bin;${env.GRADLE_HOME}/bin;${env.PATH}"
+    }     
+  
+    /** Checkout
+    * Get source code from SVN, Git,...
+    */
+    stages {
+        stage('Checkout') {
+            steps {
+                checkout([$class: 'GitSCM', 
+                branches: [[name: "${branch}"]],
+                doGenerateSubmoduleConfigurations: false, 
+                extensions: [[$class: 'CleanBeforeCheckout']], gitTool: 'jgitapache', 
+                submoduleCfg: [], 
+                userRemoteConfigs: [[credentialsId: "${credentialID}", 
+                url: "${gitUrl}"]]
+                ])
+            }
+        }
+
+        /** Build - Compile
+        * writeFile: Write file build commandline
+        * file: File name
+        * text: commandline build
+        * build.bat: Build commandline use ant build tool
+        */
+        stage('Build') {
+            steps {
+                bat "gradle clean build"                                             
+            }
+        }
+
+        /** Sonarqube Scanner
+        * Dsonar.sourceEncoding: Encoding of the source code. Default is default system encoding
+        * Dsonar.language: Main language
+        * Dsonar.scm.disabled: Disable SCM
+        * Dsonar.sources: Path to source folder. Defaults to .
+        * Dsonar.java.binaries: Comma-separated paths to directories containing the compiled bytecode files corresponding to your source files
+        */
+        stage('Sonarqube') {
+            steps {
+                bat "sonar-scanner.bat "+
+                    "-Dsonar.login=${token_sonarqube} "+
+                    "-Dsonar.host.url=${sonar_host_url} "+
+                    "-Dsonar.projectKey=${project} "+
+                    "-Dsonar.projectName=${project} "+
+                    "-Dsonar.sourceEncoding=UTF-8 "+
+                    // "-Dsonar.branch.name=${branch} " +
+                    //-Dsonar.coverage.jacoco.xmlReportPaths = path_to_file_report " +
+                    "-Dsonar.sources=. "+                                      
+                    "-Dsonar.java.binaries=. "+
+                    "-Dsonar.projectVersion=${currentBuild.number}_${branch}"
+            }
+        }
+
+        /** Black Duck Scanner
+        * snippet-matching: Path to source folder. Defaults to .
+        * verbose: Display verbose output
+        * insecure: Ignore TLS validation failures
+        */
+        stage('Blackduck') {
+            steps {
+                bat "scan.cli.bat " +
+                    "--host ${blackduck_server} " +
+                    "--project ${project} " +
+                    "--name ${project}.scan " +
+                    "--insecure " +
+                    "--release 1.0 " +
+                    "--exclude ${blackduck_exclude} " +
+                    "--verbose " +
+                    "--snippet-matching ."
+            }
+        }
+    }             
+                  
+    post {
+        /**
+        * Update status to GitLab after run CI
+        * Send email notification 
+        */
+        success {
+            updateGitlabCommitStatus name: 'JenkinsCI', state: 'success'
+            emailext (attachLog: false, 
+            body: 'Please check it out, link : $BUILD_URL', 
+            subject: "SUCCESS :Job ${env.JOB_NAME} - Build# ${env.BUILD_NUMBER}" , 
+            to:"${email}")
+        }
+
+        failure {
+            updateGitlabCommitStatus name: 'JenkinsCI', state: 'failed'
+			emailext (attachLog: true, 
+            body: 'Please check it out , link : $BUILD_URL', 
+            subject: "FAILED :Job ${env.JOB_NAME} - Build# ${env.BUILD_NUMBER}",
+            to:"${email}")
+		}
+    }
+}
